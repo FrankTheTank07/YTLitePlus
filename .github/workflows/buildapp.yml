@@ -1,5 +1,6 @@
-# Original idea by @ISnackable. Many thanks to him for handling the most hardest parts!
-# https://github.com/ISnackable/CercubePlus/blob/main/.github/workflows/Build.yml
+# Build and Release YTLitePlus
+# This workflow builds Alderis from source via Carthage (using the newest version)
+# and embeds the resulting framework into the IPA.
 
 name: Build and Release YTLitePlus
 
@@ -160,20 +161,25 @@ jobs:
           THEOS: ${{ github.workspace }}/theos
           YOUTUBE_URL: ${{ env.URL_YT }}
 
-      - name: Checkout Alderis 1.2.3
+      # --- New steps to build and embed Alderis.framework via Carthage ---
+      - name: Install Carthage
+        run: brew install carthage
+
+      - name: Build Alderis Framework via Carthage
         run: |
-          cd Tweaks/Alderis
-          git fetch --all --tags
-          git checkout 1.2.3
+          # Create a temporary Cartfile without a version constraint to build the newest version
+          echo 'github "hbang/Alderis"' > Cartfile
+          carthage update --platform iOS
 
       - name: Embed Alderis.framework
         run: |
           # Create Frameworks directory in the app bundle if it doesn't exist
           mkdir -p main/tmp/Payload/YouTube.app/Frameworks
-          # Copy Alderis.framework from the Tweaks/Alderis submodule into the app bundle's Frameworks directory
-          cp -R Tweaks/Alderis/Alderis.framework main/tmp/Payload/YouTube.app/Frameworks/
+          # Copy the built Alderis.framework from Carthage into the app bundle
+          cp -R Carthage/Build/iOS/Alderis.framework main/tmp/Payload/YouTube.app/Frameworks/
           # Update the dynamic library load path in YTLitePlus.dylib to point to the embedded framework
           install_name_tool -change /Library/Frameworks/Alderis.framework/Alderis @executable_path/Frameworks/Alderis.framework/Alderis main/tmp/Payload/YouTube.app/Frameworks/YTLitePlus.dylib
+      # --- End Carthage steps ---
 
       - name: Build Package
         id: build_package
