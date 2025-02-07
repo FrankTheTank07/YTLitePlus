@@ -1,6 +1,5 @@
-# Build and Release YTLitePlus
-# This workflow builds Alderis from source via Carthage (using the newest version)
-# and embeds the resulting framework into the IPA.
+# Original idea by @ISnackable. Many thanks to him for handling the most hardest parts!
+# https://github.com/ISnackable/CercubePlus/blob/main/.github/workflows/Build.yml
 
 name: Build and Release YTLitePlus
 
@@ -113,7 +112,7 @@ jobs:
           ./theos-jailed/install
         env:
           THEOS: ${{ github.workspace }}/theos
-        
+
       - name: Fix Compiling
         run: |
           # Update GNU Make to allow for faster building
@@ -144,42 +143,41 @@ jobs:
           rm -rf main/tmp/Payload/YouTube.app/PlugIns/*
           # Modify Info.plist to remove UISupportedDevices (Python script)
           python - <<EOF
-          import plistlib
-          def remove_uisupporteddevices(filepath):
-              with open(filepath, 'rb') as f:
-                  plist = plistlib.load(f)
-              if 'UISupportedDevices' in plist:
-                  del plist['UISupportedDevices']
-              with open(filepath, 'wb') as f:
-                  plistlib.dump(plist, f)
-          filepath = 'main/tmp/Payload/YouTube.app/Info.plist'
-          remove_uisupporteddevices(filepath)
-          EOF
+import plistlib
+def remove_uisupporteddevices(filepath):
+    with open(filepath, 'rb') as f:
+        plist = plistlib.load(f)
+    if 'UISupportedDevices' in plist:
+        del plist['UISupportedDevices']
+    with open(filepath, 'wb') as f:
+        plistlib.dump(plist, f)
+filepath = 'main/tmp/Payload/YouTube.app/Info.plist'
+remove_uisupporteddevices(filepath)
+EOF
           # Manually install the Open in YouTube extension
           cp -R main/Extensions/*.appex main/tmp/Payload/YouTube.app/PlugIns
         env:
           THEOS: ${{ github.workspace }}/theos
           YOUTUBE_URL: ${{ env.URL_YT }}
 
-      # --- New steps to build and embed Alderis.framework via Carthage ---
+      # --- Build and embed Alderis.framework via Carthage as an XCFramework ---
       - name: Install Carthage
         run: brew install carthage
 
       - name: Build Alderis Framework via Carthage
         run: |
-          # Create a temporary Cartfile without a version constraint to build the newest version
+          # Create a temporary Cartfile to pull the Alderis repository (latest version)
           echo 'github "hbang/Alderis"' > Cartfile
-          carthage update --platform iOS
+          carthage update --platform iOS --use-xcframeworks
 
       - name: Embed Alderis.framework
         run: |
-          # Create Frameworks directory in the app bundle if it doesn't exist
+          # Create the Frameworks directory in the app bundle if it doesn't exist
           mkdir -p main/tmp/Payload/YouTube.app/Frameworks
-          # Copy the built Alderis.framework from Carthage into the app bundle
-          cp -R Carthage/Build/iOS/Alderis.framework main/tmp/Payload/YouTube.app/Frameworks/
+          # Copy the device slice of the built Alderis framework from the XCFramework
+          cp -R Carthage/Build/iOS/Alderis.xcframework/ios-arm64/Alderis.framework main/tmp/Payload/YouTube.app/Frameworks/
           # Update the dynamic library load path in YTLitePlus.dylib to point to the embedded framework
           install_name_tool -change /Library/Frameworks/Alderis.framework/Alderis @executable_path/Frameworks/Alderis.framework/Alderis main/tmp/Payload/YouTube.app/Frameworks/YTLitePlus.dylib
-      # --- End Carthage steps ---
 
       - name: Build Package
         id: build_package
@@ -193,7 +191,7 @@ jobs:
           # Build the package
           make package
           # Rename the package based on the version
-          (mv "packages/$(ls -t packages | head -n1)" "packages/YTLitePlus_${{ env.YT_VERSION }}_5.0.1.ipa")
+          mv "packages/$(ls -t packages | head -n1)" "packages/YTLitePlus_${{ env.YT_VERSION }}_5.0.1.ipa"
           # Pass package name to the upload step
           echo "package=$(ls -t packages | head -n1)" >> $GITHUB_OUTPUT
           # Print out the hash and bundle ID
@@ -211,7 +209,7 @@ jobs:
           name: YTLitePlus_${{ env.YT_VERSION }}_${{ env.YTLITE_VERSION }}
           path: ${{ github.workspace }}/main/packages/${{ steps.build_package.outputs.package }}
           if-no-files-found: error
-          
+
       - name: Upload Artifact to Catbox
         if: ${{ inputs.catbox_upload }}
         run: |
@@ -219,16 +217,14 @@ jobs:
           CATBOX_URL=$(echo $RESPONSE | grep -o -E 'https://files.catbox.moe/[^"]*')
           echo "Uploaded artifact to $CATBOX_URL"
           CATBOX_FILE=$(echo $CATBOX_URL | sed 's|https://files.catbox.moe/||')
-          # Pass Catbox URL to the release steps
           echo "CATBOX_FILE=$CATBOX_FILE" >> $GITHUB_ENV
           echo "CATBOX_URL=$CATBOX_URL" >> $GITHUB_ENV
-      
+
       - name: Prepare Release Notes
         if: ${{ inputs.create_release }}
         run: |
           export TODAY=$(date '+%Y-%m-%d')
-          sed "s/%ytliteplus_version%/${{ env.YTLITE_VERSION }}/g; s/%youtube_version%/5.0.1/g; s/%catbox_url%/${{ env.CATBOX_FILE }}/g; s/%date%/$TODAY/g" \
-          main/.github/RELEASE_TEMPLATE/Release.md > ${{ github.workspace }}/release_notes.md
+          sed "s/%ytliteplus_version%/${{ env.YTLITE_VERSION }}/g; s/%youtube_version%/5.0.1/g; s/%catbox_url%/${{ env.CATBOX_FILE }}/g; s/%date%/$TODAY/g" main/.github/RELEASE_TEMPLATE/Release.md > ${{ github.workspace }}/release_notes.md
 
       - name: Create Draft Release
         if: ${{ inputs.create_release }}
@@ -249,23 +245,18 @@ jobs:
           curl --location --request POST 'https://api.github.com/repos/Balackburn/YTLitePlusAltstore/dispatches' \
           --header 'Authorization: token ${{ secrets.PERSONAL_ACCESS_TOKEN }}' \
           --header 'Content-Type: application/json' \
-          --data-raw '{
-            "event_type": "update-altstore-source-trigger"
-          }'
+          --data-raw '{"event_type": "update-altstore-source-trigger"}'
 
       - name: Job Summary
-        run: |
-          echo -e '### 📺 Build Complete' >> $GITHUB_STEP_SUMMARY
+        run: echo -e '### 📺 Build Complete' >> $GITHUB_STEP_SUMMARY
 
       - name: Job Summary - Artifact Upload
         if: ${{ inputs.upload_artifact }}
-        run: |
-          echo -e '### 📦 Artifact Upload\n\nThe artifact was uploaded successfully! Refresh and [scroll down](#artifacts) to view the artifact. Note that you must be signed in to GitHub to download it.' >> $GITHUB_STEP_SUMMARY
+        run: echo -e '### 📦 Artifact Upload\n\nThe artifact was uploaded successfully! Refresh and [scroll down](#artifacts) to view the artifact. Note that you must be signed in to GitHub to download it.' >> $GITHUB_STEP_SUMMARY
 
       - name: Job Summary - Catbox Upload
-        if: ${{ inputs.catbox_upload}}
-        run: |
-          echo -e '### 🐱 Catbox Upload\n\nThe Catbox upload was successful! Here is a permanent shareable link: '$CATBOX_URL >> $GITHUB_STEP_SUMMARY
+        if: ${{ inputs.catbox_upload }}
+        run: echo -e '### 🐱 Catbox Upload\n\nThe Catbox upload was successful! Here is a permanent shareable link: '$CATBOX_URL >> $GITHUB_STEP_SUMMARY
 
       - name: Job Summary - Draft Release
         if: ${{ inputs.create_release }}
