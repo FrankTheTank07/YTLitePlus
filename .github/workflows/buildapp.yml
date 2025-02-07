@@ -160,6 +160,12 @@ jobs:
           THEOS: ${{ github.workspace }}/theos
           YOUTUBE_URL: ${{ env.URL_YT }}
 
+      - name: Checkout Alderis 1.2.3
+        run: |
+          cd Tweaks/Alderis
+          git fetch --all --tags
+          git checkout 1.2.3
+
       - name: Embed Alderis.framework
         run: |
           # Create Frameworks directory in the app bundle if it doesn't exist
