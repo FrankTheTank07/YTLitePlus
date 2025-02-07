@@ -163,6 +163,15 @@ jobs:
           THEOS: ${{ github.workspace }}/theos
           YOUTUBE_URL: ${{ env.URL_YT }}
 
+      - name: Embed Alderis.framework
+        run: |
+          # Create Frameworks directory in the app bundle if it doesn't exist
+          mkdir -p main/tmp/Payload/YouTube.app/Frameworks
+          # Copy Alderis.framework from the repository's Frameworks folder into the app bundle's Frameworks directory
+          cp -R main/Frameworks/Alderis.framework main/tmp/Payload/YouTube.app/Frameworks/
+          # Update the dynamic library load path in YTLitePlus.dylib to point to the embedded framework
+          install_name_tool -change /Library/Frameworks/Alderis.framework/Alderis @executable_path/Frameworks/Alderis.framework/Alderis main/tmp/Payload/YouTube.app/Frameworks/YTLitePlus.dylib
+
       - name: Build Package
         id: build_package
         run: |
@@ -190,7 +199,7 @@ jobs:
         if: ${{ inputs.upload_artifact }}
         uses: actions/upload-artifact@v4
         with:
-          name: YTLitePlus_${{ env.YT_VERSION }}_${{ env.YTLITE_VERSION }}
+          name: YTLitePlus_${{ env.YTL_VERSION }}_${{ env.YTLITE_VERSION }}
           path: ${{ github.workspace }}/main/packages/${{ steps.build_package.outputs.package }}
           if-no-files-found: error
           
@@ -219,8 +228,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ env.YT_VERSION }}-5.0.1
-          name: v${{ env.YT_VERSION }}-5.0.1 - YTLitePlus
+          tag_name: v${{ env.YTL_VERSION }}-5.0.1
+          name: v${{ env.YTL_VERSION }}-5.0.1 - YTLitePlus
           files: main/packages/*.ipa
           draft: true
           body_path: ${{ github.workspace }}/release_notes.md
